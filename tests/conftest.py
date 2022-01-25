@@ -1,4 +1,6 @@
 import pytest
+from appium import webdriver
+
 from . import config, credentials
 
 # definir os valores default / padrão
@@ -29,15 +31,16 @@ def pytest_addoption(parser):
     )
 
 @pytest.fixture
-def driver (request):
-    #passa os valores do arquivo config.py ou os valores default
+def driver(request):
+    # passa os valores do arquivo config.py ou os valores default do pytest_addoption
     config.baseurl = request.config.getoption('--baseurl')
     config.host = request.config.getoption('--host')
     config.platform_name = request.config.getoption('--platform_name')
-    config.platform_version = request.config.getoption('--platform_version')
+    config.platform_version= request.config.getoption('--platform_version')
 
+    # direciona para execução do Appium local ou na nuvem
     if config.host == 'saucelabs':
-        test_name = request.node.name
+        test_name = request.node.name # nome do teste
         caps = {
             'platformName': 'Android',
             # 'appium:platformVersion': '10.0' # versão do emulador local
@@ -45,7 +48,7 @@ def driver (request):
             'browserName': '',
             # 'appium:appiumVersion': '1.22.0'    # apenas quando local ou próprio (rede)
             # 'appium:deviceName': 'emulator5554' # aparelho ou emulador local
-            'appium:deviceName': 'Galaxy S9 FHD GoogleAPI Emulator',  # emulador no Saucelabs
+            'appium:deviceName': 'Galaxy S9 FHD GoogleAPI Emulator', # emulador no Saucelabs
             'appium:deviceOrientation': 'portrait',
             'appium:app': 'storage:filename=mda-1.0.10-12.apk',
             'appium:appPackage': 'com.saucelabs.mydemoapp.android',
@@ -59,9 +62,48 @@ def driver (request):
             }
         }
 
-        # Montar a credencial e a URL
+        # montar a credencial e a url
         _credentials = credentials.SAUCE_USER_NAME + ':' + credentials.SAUCE_ACCESS_KEY
         _url = 'https://' + _credentials + config.baseurl
 
         # instanciar o Saucelabs
         driver_ = webdriver.Remote(_url, caps)
+
+    # execução local
+    else:
+        caps = {
+            'platformName': config.platform_name,
+            'appium:platformVersion': config.platform_version,
+            'browserName': '',
+            'appium:appiumVersion': '1.22.0',    # apenas quando local ou próprio (rede)
+            'appium:deviceName': 'emulator5554', # aparelho ou emulador local
+            'appium:deviceOrientation': 'portrait',
+            'appium:appPackage': 'com.saucelabs.mydemoapp.android',
+            'appium:appActivity': 'com.saucelabs.mydemoapp.android.view.activities.SplashActivity',
+            'appium:ensureWebviewsHavePages': True,
+            'appium:nativeWebScreenshot': True,
+            'appium:newCommandTimeout': 3600,
+            'appium:connectHardwareKeyboard': True,
+        }
+
+        # instanciar o device ou emulador via Appium local
+        driver_ = webdriver.Remote(config.baseurl + ':4723/wd/hub', caps)
+
+    # função de finalização
+    def quit():
+        sauce_result = 'failed' if request.node.rep_call.failed else 'passed'
+        driver_.execute_('sauce:job-result={}'.format(sauce_result))
+        driver_.quit()
+
+    request.addfinalizer(quit) # definiu como uma requisição no PyTest acaba
+    return driver_
+
+# configuração do Hook para relatórios
+pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    rep = outcome.get_result()
+    setattr(item, 'rep_' + rep.when, rep)
+
+
+
